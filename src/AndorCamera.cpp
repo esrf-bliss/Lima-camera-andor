@@ -232,6 +232,14 @@ Camera::Camera(const std::string& config_path,int camera_number)
 Camera::~Camera()
 {
     DEB_DESTRUCTOR();
+    closeConnection();
+}
+
+//---------------------------
+// @brief  Dtor
+//---------------------------
+void Camera::closeConnection()
+{
     // Stop Acq thread
     delete m_acq_thread;
     m_acq_thread = NULL;

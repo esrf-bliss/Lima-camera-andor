@@ -433,3 +433,13 @@ def get_control(config_path='/usr/local/etc/andor', camera_number = '0',**keys) 
 def get_tango_specific_class_n_device():
     return AndorClass,Andor
 
+
+# =============================================================================
+# =============================================================================
+# called by ->  delete_device (LimaCCDs.py:352)
+# requiered to close properly the camera / sdk
+#   because the cam, interface destructors are called in wrong order
+# =============================================================================
+def close_interface():
+    print("... close_interface()")
+    _AndorCamera.closeConnection()

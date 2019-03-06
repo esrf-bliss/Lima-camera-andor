@@ -253,6 +253,7 @@ namespace lima
 	    //void setReadMode(ReadMode mode);
 	    void setBaselineClamp(BaselineClamp mode);
 	    void getBaselineClamp(BaselineClamp& mode);
+	    void closeConnection();
 
 	private:
 	    class _AcqThread;
