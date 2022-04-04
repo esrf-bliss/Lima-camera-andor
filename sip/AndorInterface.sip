@@ -51,5 +51,8 @@ namespace Andor
     void getFanMode(Andor::FanMode& mode /Out/);
     void setBaselineClamp(Andor::BaselineClamp mode);
     void getBaselineClamp(Andor::BaselineClamp& mode /Out/);
+
+ private:
+    Interface(const Andor::Interface&);
   };
 };
