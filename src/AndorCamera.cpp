@@ -65,7 +65,7 @@ private:
 //---------------------------
 // @brief  Ctor
 //---------------------------
-Camera::Camera(const std::string& config_path,int camera_number)
+Camera::Camera(const std::string& config_path, int serial_number)
     : m_status(Ready),
       m_wait_flag(true),
       m_quit(false),
@@ -95,7 +95,8 @@ Camera::Camera(const std::string& config_path,int camera_number)
 {
     DEB_CONSTRUCTOR();
     m_config_path = config_path;
-    m_camera_number = camera_number;
+    m_serial_number = serial_number;
+    m_camera_number = -1;
   
     // --- Get available cameras and select the choosen one.
 #if defined(WIN32)
@@ -103,22 +104,43 @@ Camera::Camera(const std::string& config_path,int camera_number)
 #else
     int numCameras;
 #endif	
-    DEB_TRACE() << "Get all attached cameras";
-    THROW_IF_NOT_SUCCESS(GetAvailableCameras(&numCameras), "No camera present!");
+    THROW_IF_NOT_SUCCESS(GetAvailableCameras(&numCameras), "No camera present, please check the powersupply and/or USB cabling !!");
+
+    if (m_serial_number)
+        DEB_ALWAYS() << "Requested camera with serial number " << m_serial_number;
     
-    DEB_TRACE() << "Found "<< numCameras << " camera" << ((numCameras>1)? "s": "");
-    DEB_TRACE() << "Try to set current camera to number " << m_camera_number;
-    
-    if (m_camera_number < numCameras && m_camera_number >=0)
-    {        
-        THROW_IF_NOT_SUCCESS(GetCameraHandle(m_camera_number, &m_camera_handle),"Cannot get camera handle");
-	THROW_IF_NOT_SUCCESS(SetCurrentCamera(m_camera_handle), "Cannot set camera handle");
-    }
-    else
+    DEB_ALWAYS() << "Found "<< numCameras << " camera" << ((numCameras>1)? "s": "");
+    for (int cam=0; cam != numCameras; cam++)
     {
-	DEB_ERROR() << "Invalid camera number " << m_camera_number << ", there is "<< numCameras << " available";
-	THROW_HW_ERROR(InvalidValue) << "Invalid Camera number ";
+        char	model[AT_CONTROLLER_CARD_MODEL_LEN];
+	int     serial;
+	at_32   camera_handle;
+	THROW_IF_NOT_SUCCESS(GetCameraHandle(cam, camera_handle),"Cannot get camera handle");
+	THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot set camera handle");
+	THROW_IF_NOT_SUCCESS(GetHeadModel(model), "Cannot get camera model");
+	THROW_IF_NOT_SUCCESS(GetCameraSerialNumber(&serial), "Cannot get camera serial number");
+	
+	DEB_ALWAYS() << "  * Camera #" << cam << ", Serial num. " << serial << " , model " << model;
+	if (m_serial_number != 0 && serial == m_serial_number)
+	{
+	    m_detector_model = model;
+	    m_detector_serial = serial;
+	    m_camera_handle = camera_handle;
+	    m_camera_number = cam;
+	}
+	else if (m_serial_number == 0 && cam == 0)
+	{
+	    m_detector_model = model;
+	    m_detector_serial = serial;
+	    m_camera_handle = camera_handle;	    
+	    m_camera_number = cam;
+	}
     }
+
+    if (m_serial_number != 0 && m_camera_number == -1)
+      THROW_HW_ERROR(Error) << "No camera found with serial number " <<  m_serial_number;        
+    if (m_serial_number == 0 && m_camera_number == -1)
+      DEB_ALWAYS() << "No serial number provided, attached on camera #0 with serial number " << m_serial_number;
 
 
     // --- Initialize  the library    
@@ -148,14 +170,6 @@ Camera::Camera(const std::string& config_path,int camera_number)
     m_andor_type_maps[17]="CLARA";
     m_andor_type_maps[18]="USBISTAR";
         
-    // --- Get Camera model
-    char	model[AT_CONTROLLER_CARD_MODEL_LEN];
-    int         serial;
-    THROW_IF_NOT_SUCCESS(GetHeadModel(model), "Cannot get camera model");
-    THROW_IF_NOT_SUCCESS(GetCameraSerialNumber(&serial), "Cannot get camera serial number");
-
-    m_detector_model = model;
-    m_detector_serial = serial;
     m_detector_type = m_andor_type_maps[m_camera_capabilities.ulCameraType];
     
     DEB_TRACE() << "Andor Camera device found:\n" 

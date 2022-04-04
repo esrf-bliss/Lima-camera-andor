@@ -155,7 +155,7 @@ namespace lima
 		MANUAL
 	    };
 
-	    Camera(const std::string& config_path,int camera_number=0);
+	    Camera(const std::string& config_path, int serial_number=0);
 	    ~Camera();
 
 	    void prepareAcq();
@@ -292,6 +292,7 @@ namespace lima
     
 	    //- andor SDK stuff
 	    std::string                 m_config_path;
+	    std::string                 m_serial_number;
 	    int                         m_camera_number;
 	    at_32                       m_camera_handle;
 	    AndorCapabilities           m_camera_capabilities;

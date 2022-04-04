@@ -235,9 +235,9 @@ class AndorClass(PyTango.DeviceClass):
         'config_path':
         [PyTango.DevString,
          'configuration path directory', []],
-        'camera_number':
-        [PyTango.DevShort,
-         'Camera number', []],
+        'serial_number':
+        [PyTango.DevLong,
+         'Camera serial number', []],
         'p_gain':
         [PyTango.DevString,
          'Preamplifier gain', []],
@@ -418,13 +418,13 @@ from Lima  import Andor as AndorAcq
 _AndorCamera = None
 _AndorInterface = None
 
-def get_control(config_path='/usr/local/etc/andor', camera_number = '0',**keys) :
+def get_control(config_path='/usr/local/etc/andor', serial_number=0, **keys) :
     #properties are passed here as string
     global _AndorCamera
     global _AndorInterface
     if _AndorCamera is None:
         print ('\n\nStarting and configuring the Andor camera ...')
-        _AndorCamera = AndorAcq.Camera(config_path, int(camera_number))
+        _AndorCamera = AndorAcq.Camera(config_path, int(serial_number))
         _AndorInterface = AndorAcq.Interface(_AndorCamera)
         print ('\n\nAndor Camera #%s (%s:%s) is started'%(camera_number,_AndorCamera.getDetectorType(),_AndorCamera.getDetectorModel()))
     return Core.CtControl(_AndorInterface)
