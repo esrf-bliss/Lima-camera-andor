@@ -426,7 +426,7 @@ def get_control(config_path='/usr/local/etc/andor', serial_number=0, **keys) :
         print ('\n\nStarting and configuring the Andor camera ...')
         _AndorCamera = AndorAcq.Camera(config_path, int(serial_number))
         _AndorInterface = AndorAcq.Interface(_AndorCamera)
-        print ('\n\nAndor Camera #%s (%s:%s) is started'%(camera_number,_AndorCamera.getDetectorType(),_AndorCamera.getDetectorModel()))
+        print ('\n\nAndor Camera %s: %s is started'%(_AndorCamera.getDetectorType(),_AndorCamera.getDetectorModel()))
     return Core.CtControl(_AndorInterface)
 
     

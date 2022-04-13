@@ -103,24 +103,42 @@ Camera::Camera(const std::string& config_path, int serial_number)
     long numCameras;	
 #else
     int numCameras;
-#endif	
+#endif
+
+
     THROW_IF_NOT_SUCCESS(GetAvailableCameras(&numCameras), "No camera present, please check the powersupply and/or USB cabling !!");
 
     if (m_serial_number)
-        DEB_ALWAYS() << "Requested camera with serial number " << m_serial_number;
+      std::cout << "Requested camera with serial number " << m_serial_number << std::endl;
     
-    DEB_ALWAYS() << "Found "<< numCameras << " camera" << ((numCameras>1)? "s": "");
+    std::cout << "Found "<< numCameras << " camera" << ((numCameras>1)? "s:": ":") << std::endl;
     for (int cam=0; cam != numCameras; cam++)
     {
         char	model[AT_CONTROLLER_CARD_MODEL_LEN];
 	int     serial;
-	at_32   camera_handle;
-	THROW_IF_NOT_SUCCESS(GetCameraHandle(cam, camera_handle),"Cannot get camera handle");
-	THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot set camera handle");
-	THROW_IF_NOT_SUCCESS(GetHeadModel(model), "Cannot get camera model");
-	THROW_IF_NOT_SUCCESS(GetCameraSerialNumber(&serial), "Cannot get camera serial number");
+	int   camera_handle;
 	
-	DEB_ALWAYS() << "  * Camera #" << cam << ", Serial num. " << serial << " , model " << model;
+	std::cout << "Cam # " << cam << std::endl;
+	THROW_IF_NOT_SUCCESS(GetCameraHandle(cam, &camera_handle),"Cannot get camera handle: ");
+	THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot set camera handle: ");
+
+	// --- Initialize  the library    
+	if ( DRV_SUCCESS != Initialize((char *)m_config_path.c_str()))
+	{
+	  // this camera is probably already open, just skip it
+	  std::cout << "Skip camera #" << cam << " probably already open by another program" << std::endl;
+	  //continue;
+	}
+
+	THROW_IF_NOT_SUCCESS(GetHeadModel(model), "Cannot get camera model: ");
+	THROW_IF_NOT_SUCCESS(GetCameraSerialNumber(&serial), "Cannot get camera serial number: ");
+
+	//THROW_IF_NOT_SUCCESS(GetCurrentCamera(&camera_handle), "Cannot Get camera handle: ");
+	//THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot Set camera handle: ");
+	//THROW_IF_NOT_SUCCESS(ShutDown(), "Cannot shutdown (close) the camera: ");
+	//Initialize((char *)m_config_path.c_str());
+	
+	std::cout  << "  * Camera #" << cam << ", Serial num. " << serial << ", model " << model << std::endl;
 	if (m_serial_number != 0 && serial == m_serial_number)
 	{
 	    m_detector_model = model;
@@ -133,19 +151,25 @@ Camera::Camera(const std::string& config_path, int serial_number)
 	    m_detector_model = model;
 	    m_detector_serial = serial;
 	    m_camera_handle = camera_handle;	    
-	    m_camera_number = cam;
 	}
     }
 
     if (m_serial_number != 0 && m_camera_number == -1)
       THROW_HW_ERROR(Error) << "No camera found with serial number " <<  m_serial_number;        
     if (m_serial_number == 0 && m_camera_number == -1)
-      DEB_ALWAYS() << "No serial number provided, attached on camera #0 with serial number " << m_serial_number;
-
-
-    // --- Initialize  the library    
+    {
+      std::cout << "No serial number provided, attached on camera #0 with serial number " << m_detector_serial << std::endl;
+      m_camera_number = 0;
+    }
+    else
+    {
+      std::cout << "Attached on camera #"<< m_camera_number << " with serial number " << m_detector_serial << std::endl;       
+    }
+    // To allow an other program to access the unsused camera we shutdown them above, now we initialize the selected one
+    THROW_IF_NOT_SUCCESS(SetCurrentCamera(m_camera_handle), "Cannot set camera handle: ");
     THROW_IF_NOT_SUCCESS(Initialize((char *)m_config_path.c_str()), "Library initialization failed, check the config. path");
-    
+        
+
     // --- Get camera capabilities
     m_camera_capabilities.ulSize = sizeof(AndorCapabilities);
     THROW_IF_NOT_SUCCESS(GetCapabilities(&m_camera_capabilities), "Cannot get camera capabilities");
@@ -1035,13 +1059,13 @@ void Camera::initialiseController()
     int is;
     for (is=0; is< m_adc_speed_number; is++)
     {
-        DEB_ALWAYS() << "    (" << is << ") adc #" << m_adc_speeds[is].adc << ", speed = " 
+        DEB_TRACE() << "    (" << is << ") adc #" << m_adc_speeds[is].adc << ", speed = " 
                     << m_adc_speeds[is].speed  << ((is == m_adc_speed_max_index)? " [max]": "");                        
     }
         
     // --- Set adc / speed to max
     setAdcSpeed(m_adc_speed_max_index);
-    DEB_ALWAYS() << "    => Set to " << m_adc_speeds[m_adc_speed_max_index].speed << "MHz";
+    DEB_TRACE() << "    => Set to " << m_adc_speeds[m_adc_speed_max_index].speed << "MHz";
        
         
     // --- Init VS Speeds 
@@ -1050,29 +1074,29 @@ void Camera::initialiseController()
     DEB_TRACE() << "* Vertical Shift Speed:";
     for (is=0; is<m_vss_number; is++)
     {
-        DEB_ALWAYS() << "    (" << is << ") speed = " << m_vsspeeds[is] << " us"
+        DEB_TRACE() << "    (" << is << ") speed = " << m_vsspeeds[is] << " us"
                     << ((is == m_vss_best)? " [recommended]": "");
     }
         
     // --- Set VS Speed to fasten recommended
     setVsSpeed(m_vss_best);
-    DEB_ALWAYS() << "    => Set " << m_vsspeeds[m_vss] << "us";
+    DEB_TRACE() << "    => Set " << m_vsspeeds[m_vss] << "us";
         
         
     // --- Init Preamp Gain to max
     initPGain();
        
-    DEB_ALWAYS() << "* Preamp Gain:";
+    DEB_TRACE() << "* Preamp Gain:";
         
     for (is=0; is< m_gain_number; is++)
     {
-        DEB_ALWAYS() << "    (" << is << ") gain = x" << m_preamp_gains[is]
+        DEB_TRACE() << "    (" << is << ") gain = x" << m_preamp_gains[is]
                     << ((is == m_gain_max)? " [max]": "");
     }
     
     // --- Set Preamp Gain
     setPGain(m_gain_max);
-    DEB_ALWAYS() << "    => Set to x" << m_preamp_gains[m_gain];                 
+    DEB_TRACE() << "    => Set to x" << m_preamp_gains[m_gain];                 
 }
 //-----------------------------------------------------
 // @brief get possible adc/speed for controller

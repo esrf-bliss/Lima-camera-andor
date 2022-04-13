@@ -292,7 +292,7 @@ namespace lima
     
 	    //- andor SDK stuff
 	    std::string                 m_config_path;
-	    std::string                 m_serial_number;
+	    int                         m_serial_number;
 	    int                         m_camera_number;
 	    at_32                       m_camera_handle;
 	    AndorCapabilities           m_camera_capabilities;
