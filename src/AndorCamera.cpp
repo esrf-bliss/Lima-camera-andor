@@ -127,15 +127,15 @@ Camera::Camera(const std::string& config_path, int serial_number)
 	{
 	  // this camera is probably already open, just skip it
 	  std::cout << "Skip camera #" << cam << " probably already open by another program" << std::endl;
-	  //continue;
+	  continue;
 	}
 
 	THROW_IF_NOT_SUCCESS(GetHeadModel(model), "Cannot get camera model: ");
 	THROW_IF_NOT_SUCCESS(GetCameraSerialNumber(&serial), "Cannot get camera serial number: ");
 
 	//THROW_IF_NOT_SUCCESS(GetCurrentCamera(&camera_handle), "Cannot Get camera handle: ");
-	//THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot Set camera handle: ");
-	//THROW_IF_NOT_SUCCESS(ShutDown(), "Cannot shutdown (close) the camera: ");
+	THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot Set camera handle: ");
+	THROW_IF_NOT_SUCCESS(ShutDown(), "Cannot shutdown (close) the camera: ");
 	//Initialize((char *)m_config_path.c_str());
 	
 	std::cout  << "  * Camera #" << cam << ", Serial num. " << serial << ", model " << model << std::endl;
