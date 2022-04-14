@@ -19,9 +19,9 @@ requirements:
   host:
     - python {{ python }}
     - sip 4.19* # API v12.7
-    - lima-core
+    - lima-core >=1.9.23
     - andor2-sdk >=2.102.30013 # [win]
-    - andor2-sdk >=2.103.30022 # [linux]
+    - andor2-sdk >=2.104.30064 # [linux]
   build:
     - cmake
     - ninja

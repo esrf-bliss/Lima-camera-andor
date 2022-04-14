@@ -24,7 +24,13 @@
 #include <iostream>
 #include <string>
 #include <math.h>
+#ifdef __unix
 #include <unistd.h>
+#include <sys/time.h>
+#else
+#include <processlib/win/unistd.h>
+#include <processlib/win/time_compat.h>
+#endif
 
 #include "AndorCamera.h"
 
@@ -116,8 +122,11 @@ Camera::Camera(const std::string& config_path, int serial_number)
     {
         char	model[AT_CONTROLLER_CARD_MODEL_LEN];
 	int     serial;
-	int   camera_handle;
-	
+#if defined(WIN32)
+	long   camera_handle;
+#else
+	int    camera_handle;
+#endif
 	std::cout << "Cam # " << cam << std::endl;
 	THROW_IF_NOT_SUCCESS(GetCameraHandle(cam, &camera_handle),"Cannot get camera handle: ");
 	THROW_IF_NOT_SUCCESS(SetCurrentCamera(camera_handle), "Cannot set camera handle: ");
