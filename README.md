@@ -12,11 +12,11 @@ This is the LImA plugin for Andor CCD cameras.
 
 ### Camera python
 
-conda install -c esrf-bcu lima-camera-andor
+conda install -c conda-forge -c esrf-bcu lima-camera-andor
 
 ### Camera tango device server
 
-conda install -c tango-controls -c esrf-bcu lima-camera-andor-tango
+conda install -c conda-forge -c esrf-bcu lima-camera-andor-tango
 
 # LImA
 
