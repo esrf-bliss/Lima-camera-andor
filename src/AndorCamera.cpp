@@ -112,7 +112,7 @@ Camera::Camera(const std::string& config_path, int serial_number)
 #endif
 
 
-    THROW_IF_NOT_SUCCESS(GetAvailableCameras(&numCameras), "No camera present, please check the powersupply and/or USB cabling !!");
+    THROW_IF_NOT_SUCCESS(GetAvailableCameras(&numCameras), "No camera present, please check the powersupply and/or USB cabling !!: ");
 
     if (m_serial_number)
       std::cout << "Requested camera with serial number " << m_serial_number << std::endl;
@@ -176,7 +176,7 @@ Camera::Camera(const std::string& config_path, int serial_number)
     }
     // To allow an other program to access the unsused camera we shutdown them above, now we initialize the selected one
     THROW_IF_NOT_SUCCESS(SetCurrentCamera(m_camera_handle), "Cannot set camera handle: ");
-    THROW_IF_NOT_SUCCESS(Initialize((char *)m_config_path.c_str()), "Library initialization failed, check the config. path");
+    THROW_IF_NOT_SUCCESS(Initialize((char *)m_config_path.c_str()), "Library initialization failed, check the config. path: ");
         
 
     // --- Get camera capabilities
@@ -251,7 +251,7 @@ Camera::Camera(const std::string& config_path, int serial_number)
     DEB_TRACE() << "Maximum exposure time : "<< m_exp_time_max << "sec.";
     
     setExpTime(m_exp_time);
-    
+
     // --- Set detector for software single image mode    
     m_trig_mode_maps[IntTrig] = 0;
     m_trig_mode_maps[ExtTrigMult] = 1;
@@ -268,6 +268,14 @@ Camera::Camera(const std::string& config_path, int serial_number)
      // --- set shutter mode to FRAME
     setShutterMode(FRAME);        
     
+    // Check if this camera model support the IntTrigMult mode
+    
+    if (IsTriggerModeAvailable(10) == DRV_SUCCESS)
+      DEB_ALWAYS() << "IntTrigMulti supported";
+    else
+      DEB_ALWAYS() << "IntTrigMulti NOT supported";
+      
+			       
     // --- finally start the acq thread
     m_acq_thread = new _AcqThread(*this);
     m_acq_thread->start();
@@ -320,7 +328,8 @@ void Camera::startAcq()
     // --- check first the acquisition is idle
     int status;
     THROW_IF_NOT_SUCCESS(GetStatus(&status), "Cannot get status");
-    if (status != DRV_IDLE)
+    // IDus camera model stays in running status in IntTrigMult trigger mode
+    if (status != DRV_IDLE && m_camera_capabilities.ulCameraType!=7)
     {
         _setStatus(Camera::Fault,false);        
         THROW_HW_ERROR(Error) << "Cannot start acquisition, camera is not idle";            
@@ -328,9 +337,9 @@ void Camera::startAcq()
     
     // --- Don't forget to request the maximum number of images the circular buffer can store
     // --- based on the current acquisition settings.
-    THROW_IF_NOT_SUCCESS(GetSizeOfCircularBuffer(&m_ring_buffer_size), "Cannot get size of circular buffer");
+    //THROW_IF_NOT_SUCCESS(GetSizeOfCircularBuffer(&m_ring_buffer_size), "Cannot get size of circular buffer");
 
-    DEB_TRACE() << "Andor Circular buffer size = " << m_ring_buffer_size << " images";
+    //DEB_TRACE() << "Andor Circular buffer size = " << m_ring_buffer_size << " images";
             
     // Wait running stat of acquisition thread
     AutoMutex aLock(m_cond.mutex());
@@ -636,8 +645,6 @@ bool Camera::checkTrigMode(TrigMode trig_mode)
     bool valid_mode; 
     int ret;
 
-
-
     switch (trig_mode)
     {       
     case IntTrig:
@@ -658,7 +665,9 @@ bool Camera::checkTrigMode(TrigMode trig_mode)
 	    valid_mode = false;
 	    DEB_ERROR() << "System not initializsed, cannot get trigger mode status" << " : error code = " << error_code(ret);
 	    THROW_HW_ERROR(Error) << "System not initializsed, cannot get trigger mode status";
-	    break;                                                     
+	    break;
+	default:
+	  valid_mode = false;
 	}                
         break;
 
@@ -1141,8 +1150,11 @@ void Camera::initAdcSpeed()
 	for (ih=0; ih<nSpeed[ia]; ih++) {
 	    THROW_IF_NOT_SUCCESS(GetHSSpeed(ia, 0, ih, &m_adc_speeds[is].speed), "Cannot get Horizontal Speed ");
 	    m_adc_speeds[is].adc= ia;
-	    m_adc_speeds[is].hss= ih;	    // --- iKon/iXon= speed in MHz ; others in us/pixel shift --> convert in MHz
-	    if ((m_camera_capabilities.ulCameraType!=1)&&(m_camera_capabilities.ulCameraType!=13))
+	    m_adc_speeds[is].hss= ih;
+	    // --- iKon/iXon/IDus = speed in MHz ; others in us/pixel shift --> convert in MHz
+	    if ((m_camera_capabilities.ulCameraType!=1) &&
+		(m_camera_capabilities.ulCameraType!=13) &&
+		(m_camera_capabilities.ulCameraType!=7))
 		m_adc_speeds[is].speed = (float)(1./ m_adc_speeds[is].speed);
 
 	    if (m_adc_speeds[is].speed > speedMax) {
@@ -1341,13 +1353,14 @@ void Camera::initPGain()
     float gmax;
 
     // --- get number of possible gains
-    THROW_IF_NOT_SUCCESS(GetNumberPreAmpGains(&m_gain_number), "Failed to get number of preamp gain");
+    THROW_IF_NOT_SUCCESS(GetNumberPreAmpGains(&m_gain_number), "Failed to get number of preamp gain: ");
     // --- get gain value for each
     gmax = 0.;
+
     m_preamp_gains = new float[m_gain_number];
     for (ig=0; ig<m_gain_number; ig++)
     {
-        THROW_IF_NOT_SUCCESS(GetPreAmpGain(ig, &m_preamp_gains[ig]), "Failed to get gain");
+        THROW_IF_NOT_SUCCESS(GetPreAmpGain(ig, &m_preamp_gains[ig]), "Failed to get gain: ");
 	if (m_preamp_gains[ig] >= gmax)
         {
 	    gmax = m_preamp_gains[ig];
