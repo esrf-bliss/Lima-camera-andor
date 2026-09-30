@@ -42,33 +42,29 @@
 import PyTango
 import sys, types, os, time
 
-from Lima import Core
+from lima import core
 from Lima import Andor as AndorModule
 # import some useful helpers to create direct mapping between tango attributes
 # and Lima interfaces.
-from Lima.Server import AttrHelper
+from lima.server import AttrHelper
 
-class Andor(PyTango.Device_4Impl):
-
-    Core.DEB_CLASS(Core.DebModApplication, 'LimaCCDs')
-    
 #==================================================================
 #   Andor Class Description:
 #
 #
 #==================================================================
 
-class Andor(PyTango.Device_4Impl):
+class Andor(PyTango.LatestDeviceImpl):
 
 #--------- Add you global variables here --------------------------
-    Core.DEB_CLASS(Core.DebModApplication, 'LimaCCDs')
+    core.DEB_CLASS(core.DebModule.DebModApplication, 'LimaCCDs')
 
 #------------------------------------------------------------------
 #    Device constructor
 #------------------------------------------------------------------
-    @Core.DEB_MEMBER_FUNCT
+    @core.DEB_MEMBER_FUNCT
     def __init__(self,cl, name):
-        PyTango.Device_4Impl.__init__(self,cl,name)
+        PyTango.LatestDeviceImpl.__init__(self,cl,name)
 
         # dictionnaries to be used with AttrHelper.get_attr_4u
         self.__FastExtTrigger = {'ON':True,
@@ -132,7 +128,7 @@ class Andor(PyTango.Device_4Impl):
 #------------------------------------------------------------------
 #    Device initialization
 #------------------------------------------------------------------
-    @Core.DEB_MEMBER_FUNCT
+    @core.DEB_MEMBER_FUNCT
     def init_device(self):
         self.set_state(PyTango.DevState.ON)
 
@@ -214,7 +210,7 @@ class Andor(PyTango.Device_4Impl):
 #    Description: return a list of authorized values if any
 #    argout: DevVarStringArray   
 #------------------------------------------------------------------
-    @Core.DEB_MEMBER_FUNCT
+    @core.DEB_MEMBER_FUNCT
     def getAttrStringValueList(self, attr_name):
         return AttrHelper.get_attr_string_value_list(self, attr_name)
     
@@ -427,7 +423,7 @@ def get_control(config_path='/usr/local/etc/andor', serial_number=0, **keys) :
         _AndorCamera = AndorAcq.Camera(config_path, int(serial_number))
         _AndorInterface = AndorAcq.Interface(_AndorCamera)
         print ('\n\nAndor Camera %s: %s is started'%(_AndorCamera.getDetectorType(),_AndorCamera.getDetectorModel()))
-    return Core.CtControl(_AndorInterface)
+    return core.CtControl(_AndorInterface)
 
     
 def get_tango_specific_class_n_device():
