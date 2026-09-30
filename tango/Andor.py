@@ -1,7 +1,7 @@
 ############################################################################
 # This file is part of LImA, a Library for Image Acquisition
 #
-# Copyright (C) : 2009-2016
+# Copyright (C) : 2009-2026
 # European Synchrotron Radiation Facility
 # BP 220, Grenoble 38043
 # FRANCE
@@ -23,7 +23,7 @@
 #
 # file :        Andor.py
 #
-# description : Python source for the Andor and its commands. 
+# description : Python source for the Andor and its commands.
 #                The class is derived from Device. It represents the
 #                CORBA servant object which will be accessed from the
 #                network. All commands which can be executed on the
@@ -39,393 +39,369 @@
 #         (c) - Bliss - ESRF
 #=============================================================================
 #
-import PyTango
-import sys, types, os, time
+import tango
+from tango import AttrWriteType, DevState
+from tango.server import Device, attribute, command, device_property
 
 from lima import core
-from Lima import Andor as AndorModule
-# import some useful helpers to create direct mapping between tango attributes
-# and Lima interfaces.
+from Lima import Andor as AndorAcq
 from lima.server import AttrHelper
 
-#==================================================================
-#   Andor Class Description:
-#
-#
-#==================================================================
 
-class Andor(PyTango.LatestDeviceImpl):
+def _make_dynamic_enum_fget_fset(attr_name, dict_attr_name, target_attr="_AndorInterface"):
+    """Like AttrHelper.make_fget_fset, but the enum dict isn't a fixed
+    class-level constant: p_gain/vs_speed/adc_speed/fan_mode/high_capacity/
+    baseline_clamp's valid values (and, for the last three, whether the
+    attribute is supported at all) are queried from the actual connected
+    camera at init_device time and stored per-instance.
+    """
+    camel = AttrHelper._title_case(attr_name)
+    get_name, set_name = "get" + camel, "set" + camel
 
-#--------- Add you global variables here --------------------------
+    def fget(self):
+        target = getattr(self, target_attr)
+        value = getattr(target, get_name)()
+        return AttrHelper.getDictKey(getattr(self, dict_attr_name), value)
+
+    def fset(self, value):
+        d = getattr(self, dict_attr_name)
+        resolved = AttrHelper.getDictValue(d, value.upper())
+        if resolved is None:
+            tango.Except.throw_exception(
+                "WrongData", "Wrong value %s: %s" % (attr_name, value.upper()), "LimaCCDs Class"
+            )
+        target = getattr(self, target_attr)
+        getattr(target, set_name)(resolved)
+
+    return fget, fset
+
+
+class Andor(Device):
+
     core.DEB_CLASS(core.DebModule.DebModApplication, 'LimaCCDs')
 
-#------------------------------------------------------------------
-#    Device constructor
-#------------------------------------------------------------------
-    @core.DEB_MEMBER_FUNCT
-    def __init__(self,cl, name):
-        PyTango.LatestDeviceImpl.__init__(self,cl,name)
+    # ------------------------------------------------------------------
+    #    Static properties
+    # ------------------------------------------------------------------
+    _AndorCamera = None
+    """Reference to Lima andor camera binding"""
+    _AndorInterface = None
+    """Reference to Lima andor interface binding"""
 
-        # dictionnaries to be used with AttrHelper.get_attr_4u
-        self.__FastExtTrigger = {'ON':True,
-                           'OFF':False}
-        self.__Cooler = {'ON': True,
-                             'OFF': False}
-        self.__ShutterLevel = {'LOW':0,
-                                   'HIGH':1}       
+    _FastExtTrigger = {'ON': True, 'OFF': False}
+    _Cooler = {'ON': True, 'OFF': False}
+    _ShutterLevel = {'LOW': 0, 'HIGH': 1}
 
-        if _AndorInterface.getFanMode() == AndorAcq.FAN_UNSUPPORTED:
-            self.__FanMode = {'UNSUPPORTED': AndorAcq.FAN_UNSUPPORTED}
-        else:
-            self.__FanMode = {'FULL': AndorAcq.FAN_ON_FULL,
-                              'LOW': AndorAcq.FAN_ON_LOW,
-                              'OFF': AndorAcq.FAN_OFF,
-                              }
+    # ------------------------------------------------------------------
+    #    Device properties (initial hardware configuration only - the
+    #    live attributes of the same name below read/write the camera
+    #    directly, they don't share storage with these)
+    # ------------------------------------------------------------------
+    config_path = device_property(dtype=str, default_value="")
+    serial_number = device_property(dtype=int, default_value=0)
+    p_gain = device_property(dtype=str, default_value="")
+    vs_speed = device_property(dtype=str, default_value="")
+    adc_speed = device_property(dtype=str, default_value="")
+    temperature_sp = device_property(dtype=int, default_value=0)
+    cooler = device_property(dtype=str, default_value="")
+    fast_ext_trigger = device_property(dtype=str, default_value="")
+    shutter_level = device_property(dtype=str, default_value="")
+    fan_mode = device_property(dtype=str, default_value="")
+    high_capacity = device_property(dtype=str, default_value="")
+    baseline_clamp = device_property(dtype=str, default_value="")
 
-        if _AndorInterface.getHighCapacity() == AndorAcq.HC_UNSUPPORTED:
-            self.__HighCapacity = {'UNSUPPORTED': AndorAcq.HC_UNSUPPORTED}
-        else:
-            self.__HighCapacity = {'HIGH_CAPACITY': AndorAcq.HIGH_CAPACITY,
-                                   'HIGH_SENSITIVITY': AndorAcq.HIGH_SENSITIVITY,
-                                   }
-
-        if _AndorInterface.getBaselineClamp() == AndorAcq.BLCLAMP_UNSUPPORTED:
-            self.__BaselineClamp = {'UNSUPPORTED': AndorAcq.BLCLAMP_UNSUPPORTED}
-        else:
-            self.__BaselineClamp = {'ON': AndorAcq.BLCLAMP_ENABLED,
-                                    'OFF': AndorAcq.BLCLAMP_DISABLED}
-
-        #Only needed to map attribute and function which does not fit the with naming convention.
-        self.__Attribute2FunctionBase = {
-            'temperature_sp': 'TemperatureSP',
-            #'my_attr1': 'AnOtherFunctionName',
-                                       }
-
-        # prepare lists of supported PGain/VerticalShiftSpeed/AdcSpeed
-        self.__PGain = {}
-        max_ind = _AndorInterface.getPGainMaxIndex()
-        for ind in range(max_ind):
-            self.__PGain[_AndorInterface.getPGainString(ind)] = ind
-        
-        self.__VsSpeed = {}
-        max_ind = _AndorInterface.getVsSpeedMaxIndex()
-        for ind in range(max_ind):
-            self.__VsSpeed[_AndorInterface.getVsSpeedString(ind)] = ind
-
-        self.__AdcSpeed = {}
-        max_ind = _AndorInterface.getAdcSpeedMaxIndex()
-        for ind in range(max_ind):
-            self.__AdcSpeed[_AndorInterface.getAdcSpeedPaireString(ind)] = ind
-        self.init_device()
-                                               
-#------------------------------------------------------------------
-#    Device destructor
-#------------------------------------------------------------------
-    def delete_device(self):
-        pass
-
-
-#------------------------------------------------------------------
-#    Device initialization
-#------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    #    Device initialization
+    # ------------------------------------------------------------------
     @core.DEB_MEMBER_FUNCT
     def init_device(self):
-        self.set_state(PyTango.DevState.ON)
+        Device.init_device(self)
 
-        # Load the properties
-        self.get_device_properties(self.get_device_class())
+        if self._AndorInterface.getFanMode() == AndorAcq.FAN_UNSUPPORTED:
+            self._fan_mode_dict = {'UNSUPPORTED': AndorAcq.FAN_UNSUPPORTED}
+        else:
+            self._fan_mode_dict = {
+                'FULL': AndorAcq.FAN_ON_FULL,
+                'LOW': AndorAcq.FAN_ON_LOW,
+                'OFF': AndorAcq.FAN_OFF,
+            }
 
-        
-       # Apply properties if any
+        if self._AndorInterface.getHighCapacity() == AndorAcq.HC_UNSUPPORTED:
+            self._high_capacity_dict = {'UNSUPPORTED': AndorAcq.HC_UNSUPPORTED}
+        else:
+            self._high_capacity_dict = {
+                'HIGH_CAPACITY': AndorAcq.HIGH_CAPACITY,
+                'HIGH_SENSITIVITY': AndorAcq.HIGH_SENSITIVITY,
+            }
+
+        if self._AndorInterface.getBaselineClamp() == AndorAcq.BLCLAMP_UNSUPPORTED:
+            self._baseline_clamp_dict = {'UNSUPPORTED': AndorAcq.BLCLAMP_UNSUPPORTED}
+        else:
+            self._baseline_clamp_dict = {
+                'ON': AndorAcq.BLCLAMP_ENABLED,
+                'OFF': AndorAcq.BLCLAMP_DISABLED,
+            }
+
+        # prepare lists of supported PGain/VerticalShiftSpeed/AdcSpeed
+        self._p_gain_dict = {}
+        for ind in range(self._AndorInterface.getPGainMaxIndex()):
+            self._p_gain_dict[self._AndorInterface.getPGainString(ind)] = ind
+
+        self._vs_speed_dict = {}
+        for ind in range(self._AndorInterface.getVsSpeedMaxIndex()):
+            self._vs_speed_dict[self._AndorInterface.getVsSpeedString(ind)] = ind
+
+        self._adc_speed_dict = {}
+        for ind in range(self._AndorInterface.getAdcSpeedMaxIndex()):
+            self._adc_speed_dict[self._AndorInterface.getAdcSpeedPaireString(ind)] = ind
+
+        # Leagcy code used by AttrHelper.get_attr_string_value_list
+        self.__FastExtTrigger = self._FastExtTrigger
+        self.__Cooler = self._Cooler
+        self.__ShutterLevel = self._ShutterLevel
+        self.__FanMode = self._fan_mode_dict
+        self.__HighCapacity = self._high_capacity_dict
+        self.__BaselineClamp = self._baseline_clamp_dict
+        self.__PGain = self._p_gain_dict
+        self.__VsSpeed = self._vs_speed_dict
+        self.__AdcSpeed = self._adc_speed_dict
+
+        # Apply properties if any
         if self.p_gain:
-            _AndorInterface.setPGain(self.__PGain[self.p_gain])
-            
+            self._AndorInterface.setPGain(self._p_gain_dict[self.p_gain])
+
         if self.vs_speed:
-            _AndorInterface.setVsSpeed(self.__VsSpeed[self.vs_speed])
-            
+            self._AndorInterface.setVsSpeed(self._vs_speed_dict[self.vs_speed])
+
         if self.adc_speed:
-            _AndorInterface.setAdcSpeed(self.__AdcSpeed[self.adc_speed])
+            self._AndorInterface.setAdcSpeed(self._adc_speed_dict[self.adc_speed])
 
-        if self.temperature_sp:            
-            _AndorInterface.setTemperatureSP(self.temperature_sp)
-            
+        if self.temperature_sp:
+            self._AndorInterface.setTemperatureSP(self.temperature_sp)
+
         if self.cooler:
-            _AndorInterface.setCooler(self.__Cooler[self.cooler])
-            
+            self._AndorInterface.setCooler(self._Cooler[self.cooler])
+
         if self.fast_ext_trigger:
-            _AndorInterface.setFastExtTrigger(self.__FastExtTrigger[self.fast_ext_trigger])
-            
+            self._AndorInterface.setFastExtTrigger(self._FastExtTrigger[self.fast_ext_trigger])
+
         if self.shutter_level:
-            _AndorInterface.setShutterLevel(self.__ShutterLevel[self.shutter_level])
+            self._AndorInterface.setShutterLevel(self._ShutterLevel[self.shutter_level])
 
-
-        if 'UNSUPPORTED' in self.__FanMode.keys() and self.fan_mode:
+        if 'UNSUPPORTED' in self._fan_mode_dict and self.fan_mode:
             deb.Error('Cannot set fan_mode property, not supported for this camera model')
         elif self.fan_mode:
-                _AndorInterface.setFanMode(self.__FanMode[self.fan_mode])
+            self._AndorInterface.setFanMode(self._fan_mode_dict[self.fan_mode])
 
-        if 'UNSUPPORTED' in self.__HighCapacity.keys() and self.high_capacity:
+        if 'UNSUPPORTED' in self._high_capacity_dict and self.high_capacity:
             deb.Error('Cannot set high_capacity property, not supported for this camera model')
         elif self.high_capacity:
-                _AndorInterface.setHighCapacity(self.__HighCapacity[self.high_capacity])
+            self._AndorInterface.setHighCapacity(self._high_capacity_dict[self.high_capacity])
 
-        if 'UNSUPPORTED' in self.__BaselineClamp.keys() and self.baseline_clamp:
+        if 'UNSUPPORTED' in self._baseline_clamp_dict and self.baseline_clamp:
             deb.Error('Cannot set baseline_clamp propery, not supported for this camera model')
         elif self.baseline_clamp:
-            _AndorInterface.setBaselineClamp(self.__BaselineClamp[self.baseline_clamp])
+            self._AndorInterface.setBaselineClamp(self._baseline_clamp_dict[self.baseline_clamp])
 
- 
-        
+        self.set_state(DevState.ON)
 
-#==================================================================
-#
-#    Andor read/write attribute methods
-#
-#==================================================================
-
-
-    def __getattr__(self,name) :
-        return AttrHelper.get_attr_4u(self, name, _AndorInterface)
-
-
-    ## @brief return the timing times, exposure and latency
-    #  
-    def read_timing(self, attr):
-        timing=[]
-        timing.append(_AndorCamera.getExpTime())
-        timing.append(_AndorCamera.getLatTime())
-        
-        attr.set_value(timing,2)        
-        
-
-#==================================================================
-#
-#    Andor command methods
-#
-#==================================================================
-
-#------------------------------------------------------------------
-#    getAttrStringValueList command:
-#
-#    Description: return a list of authorized values if any
-#    argout: DevVarStringArray   
-#------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    #    Commands
+    # ------------------------------------------------------------------
+    @command(dtype_in=str, dtype_out=(str,))
     @core.DEB_MEMBER_FUNCT
     def getAttrStringValueList(self, attr_name):
         return AttrHelper.get_attr_string_value_list(self, attr_name)
-    
 
-#==================================================================
-#
-#    Andor class definition
-#
-#==================================================================
-class AndorClass(PyTango.DeviceClass):
+    # ------------------------------------------------------------------
+    #    Attributes with custom read logic
+    # ------------------------------------------------------------------
+    def _timing_fget(self):
+        return [self._AndorCamera.getExpTime(), self._AndorCamera.getLatTime()]
 
-    #    Class Properties
-    class_property_list = {
-        }
+    timing = attribute(
+        dtype=(float,),
+        max_dim_x=2,
+        access=AttrWriteType.READ,
+        unit="second",
+        format="%f",
+        doc="[0]: exposure, [1]: latency",
+        fget=_timing_fget,
+    )
 
-    #    Device Properties
-    device_property_list = {
-        'config_path':
-        [PyTango.DevString,
-         'configuration path directory', []],
-        'serial_number':
-        [PyTango.DevLong,
-         'Camera serial number', []],
-        'p_gain':
-        [PyTango.DevString,
-         'Preamplifier gain', []],
-        'vs_speed':
-        [PyTango.DevString,
-         'Vertical shift speed', []],
-        'adc_speed':
-        [PyTango.DevString,
-         'ADC/HSspeed pairs', []],
-        'temperature_sp':
-        [PyTango.DevShort,
-         'Temperature set point in Celsius', []],
-        'cooler':
-        [PyTango.DevString,
-         'Start or stop the cooler ("ON"/"OFF")', []],
-        'fast_ext_trigger':
-        [PyTango.DevString,
-         'Trigger fast mode ("ON"/"OFF")', []],
-        'shutter_level':
-        [PyTango.DevString,
-         'level of the shutter output ("LOW"/"HIGH")', []],                 
-        'fan_mode':
-        [PyTango.DevString,
-         'Fan mode ("FAN_ON_FULL"/"ON_LOW"/"FAN_OFF")',[]],
-        'high_capacity': 
-        [PyTango.DevString,
-         'High Capacity ("HIGH_CAPACITY"/"HIGH_SENSITIVITY")',[]],
-        'baseline_clamp': 
-        [PyTango.DevString,
-         'baseline clamp  ("ON"/"OFF")',[]],
-        }
+    # ------------------------------------------------------------------
+    #    Attributes with a per-instance (hardware-queried) enum
+    # ------------------------------------------------------------------
+    _p_gain_fget, _p_gain_fset = _make_dynamic_enum_fget_fset("p_gain", "_p_gain_dict")
+    p_gain_attr = attribute(
+        name="p_gain",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        format="%s",
+        doc="Preamplifier gain from X1 to Xn (see detector spec.)",
+        fget=_p_gain_fget,
+        fset=_p_gain_fset,
+    )
+
+    _vs_speed_fget, _vs_speed_fset = _make_dynamic_enum_fget_fset("vs_speed", "_vs_speed_dict")
+    vs_speed_attr = attribute(
+        name="vs_speed",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="The vertical shift speed, in us/pixel",
+        fget=_vs_speed_fget,
+        fset=_vs_speed_fset,
+    )
+
+    _adc_speed_fget, _adc_speed_fset = _make_dynamic_enum_fget_fset("adc_speed", "_adc_speed_dict")
+    adc_speed_attr = attribute(
+        name="adc_speed",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="The ADC and Horizontal shift speed, in ADCchannel/Freq.Mhz",
+        fget=_adc_speed_fget,
+        fset=_adc_speed_fset,
+    )
+
+    _fan_mode_fget, _fan_mode_fset = _make_dynamic_enum_fget_fset("fan_mode", "_fan_mode_dict")
+    fan_mode_attr = attribute(
+        name="fan_mode",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="The FAN mode for extra-cooling: FAN_OFF, FAN_ON_FULL or FAN_ON_LOW "
+        "(UNSUPPORTED on some camera models)",
+        fget=_fan_mode_fget,
+        fset=_fan_mode_fset,
+    )
+
+    _high_capacity_fget, _high_capacity_fset = _make_dynamic_enum_fget_fset(
+        "high_capacity", "_high_capacity_dict"
+    )
+    high_capacity_attr = attribute(
+        name="high_capacity",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="HIGH_CAPACITY or HIGH_SENSITIVITY (UNSUPPORTED on some camera models)",
+        fget=_high_capacity_fget,
+        fset=_high_capacity_fset,
+    )
+
+    _baseline_clamp_fget, _baseline_clamp_fset = _make_dynamic_enum_fget_fset(
+        "baseline_clamp", "_baseline_clamp_dict"
+    )
+    baseline_clamp_attr = attribute(
+        name="baseline_clamp",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="The baseline clamping for threshold: ON or OFF (UNSUPPORTED on some camera models)",
+        fget=_baseline_clamp_fget,
+        fset=_baseline_clamp_fset,
+    )
+
+    # ------------------------------------------------------------------
+    #    Attributes fully dispatched by naming convention (fixed enums,
+    #    or no enum at all)
+    # ------------------------------------------------------------------
+    # naming-convention would compute getTemperatureSp; the underlying hw
+    # method is really named getTemperatureSP (see the original
+    # Attribute2FunctionBase override - "SP" doesn't title-case correctly).
+    def _temperature_sp_fget(self):
+        return self._AndorInterface.getTemperatureSP()
+
+    def _temperature_sp_fset(self, value):
+        self._AndorInterface.setTemperatureSP(value)
+
+    temperature_sp_attr = attribute(
+        name="temperature_sp",
+        dtype=int,
+        access=AttrWriteType.READ_WRITE,
+        unit="C",
+        format="%1d",
+        doc="in Celsius",
+        fget=_temperature_sp_fget,
+        fset=_temperature_sp_fset,
+    )
+
+    _temperature_fget, _ = AttrHelper.make_fget_fset(
+        "temperature", lambda self: self._AndorInterface
+    )
+    temperature = attribute(
+        dtype=int,
+        access=AttrWriteType.READ,
+        unit="C",
+        format="%1d",
+        doc="in Celsius",
+        fget=_temperature_fget,
+    )
+
+    _cooler_fget, _cooler_fset = AttrHelper.make_fget_fset(
+        "cooler", lambda self: self._AndorInterface, enum=_Cooler
+    )
+    cooler_attr = attribute(
+        name="cooler",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="Start/stop the cooling system: ON or OFF",
+        fget=_cooler_fget,
+        fset=_cooler_fset,
+    )
+
+    _cooling_status_fget, _ = AttrHelper.make_fget_fset(
+        "cooling_status", lambda self: self._AndorInterface
+    )
+    cooling_status = attribute(
+        dtype=str,
+        access=AttrWriteType.READ,
+        label="Cooling status",
+        doc="Tells if the setpoint temperature is reached",
+        fget=_cooling_status_fget,
+    )
+
+    _fast_ext_trigger_fget, _fast_ext_trigger_fset = AttrHelper.make_fget_fset(
+        "fast_ext_trigger", lambda self: self._AndorInterface, enum=_FastExtTrigger
+    )
+    fast_ext_trigger_attr = attribute(
+        name="fast_ext_trigger",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="Fast trigger mode: OFF (default) or ON (don't wait for the keep-clean cycle)",
+        fget=_fast_ext_trigger_fget,
+        fset=_fast_ext_trigger_fset,
+    )
+
+    _shutter_level_fget, _shutter_level_fset = AttrHelper.make_fget_fset(
+        "shutter_level", lambda self: self._AndorInterface, enum=_ShutterLevel
+    )
+    shutter_level_attr = attribute(
+        name="shutter_level",
+        dtype=str,
+        access=AttrWriteType.READ_WRITE,
+        doc="Shutter output level: LOW or HIGH TTL signal to open the shutter",
+        fget=_shutter_level_fget,
+        fset=_shutter_level_fset,
+    )
 
 
-    #    Command definitions
-    cmd_list = {
-        'getAttrStringValueList':
-        [[PyTango.DevString, "Attribute name"],
-         [PyTango.DevVarStringArray, "Authorized String value list"]]
-        }
-
-
-    #    Attribute definitions
-    attr_list = {
-        'fast_ext_trigger':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'Fast trigger mode, see manual for usage, OFF or ON',
-             }],
-        'shutter_level':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'Shutter output level, see manual for usage LOW or HIGH',
-             }],
-       'temperature_sp':
-        [[PyTango.DevShort,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'C',
-             'format': '%1d',
-             'description': 'in Celsius',
-             }],
-        'temperature':
-        [[PyTango.DevShort,
-          PyTango.SCALAR,
-          PyTango.READ],
-         {
-             'unit': 'C',
-             'format': '%1d',
-             'description': 'in Celsius',
-             }],
-        'cooler':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'Start/stop the cooler, OFF or ON',
-             }],
-        'cooling_status':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ],
-         {
-             'label':'Cooling status',
-             'unit': 'N/A',
-             'format': '%1d',
-             'description': 'return status of the cooling system, tell if the setpoint is reached',
-             }],
-        'timing':
-        [[PyTango.DevFloat,
-          PyTango.SPECTRUM,
-          PyTango.READ,2],
-        {
-             'unit': 'second',
-             'format': '%f',
-             'description': '[0]: exposure, [1]: latency',
-             }],
-        'p_gain':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '%s',
-             'description': 'Premplifier Gain which can be apply to the readout, from X1-XN, check the camera documentation for the valid range',
-             }],
-        'vs_speed':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'Vertical shift speed,  in us/pixel, check the camera documentation for the valid range',
-             }],
-        'adc_speed':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'ADC and Horizontal shift speed, in ADCchannel/Freq.Mhz, check the documentatio for more help',
-             }],
-        'high_capacity':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'HIGH_CAPACITY or HIGH_SENSITIVITY',
-             }],
-        'fan_mode':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'FAN_OFF or FAN_ON_FULL, or FAN_ON_LOW',
-             }],
-        'baseline_clamp':
-        [[PyTango.DevString,
-          PyTango.SCALAR,
-          PyTango.READ_WRITE],
-         {
-             'unit': 'N/A',
-             'format': '',
-             'description': 'ON or OFF',
-             }],
-
-        }
-
-#------------------------------------------------------------------
-#    AndorClass Constructor
-#------------------------------------------------------------------
-    def __init__(self, name):
-        PyTango.DeviceClass.__init__(self, name)
-        self.set_type(name)
-
-            
 #----------------------------------------------------------------------------
-#                              Plugins
+# Plugins
 #----------------------------------------------------------------------------
-from Lima  import Andor as AndorAcq
 
-_AndorCamera = None
-_AndorInterface = None
+def get_control(config_path='/usr/local/etc/andor', serial_number=0,
+                 _Andor=Andor, _Camera=AndorAcq.Camera, _Interface=AndorAcq.Interface,
+                 **keys):
+    camera = _Andor._AndorCamera
+    interface = _Andor._AndorInterface
 
-def get_control(config_path='/usr/local/etc/andor', serial_number=0, **keys) :
-    #properties are passed here as string
-    global _AndorCamera
-    global _AndorInterface
-    if _AndorCamera is None:
-        print ('\n\nStarting and configuring the Andor camera ...')
-        _AndorCamera = AndorAcq.Camera(config_path, int(serial_number))
-        _AndorInterface = AndorAcq.Interface(_AndorCamera)
-        print ('\n\nAndor Camera %s: %s is started'%(_AndorCamera.getDetectorType(),_AndorCamera.getDetectorModel()))
-    return core.CtControl(_AndorInterface)
+    if camera is None:
+        print('\n\nStarting and configuring the Andor camera ...')
+        camera = _Camera(config_path, int(serial_number))
+        interface = _Interface(camera)
+        print('\n\nAndor Camera %s: %s is started' % (camera.getDetectorType(), camera.getDetectorModel()))
 
-    
+    _Andor._AndorCamera = camera
+    _Andor._AndorInterface = interface
+
+    return core.CtControl(interface)
+
 def get_tango_specific_class_n_device():
-    return AndorClass,Andor
-
+    return Andor.TangoClassClass, Andor
